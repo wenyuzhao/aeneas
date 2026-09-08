@@ -10,6 +10,7 @@ type trans_ctx = decls_ctx [@@deriving show]
 
 type fun_and_loops = {
   f : Pure.fun_decl;
+  precondition : Pure.fun_decl option;
   loops : Pure.fun_decl list;
   bodies : Pure.fun_decl list;
 }

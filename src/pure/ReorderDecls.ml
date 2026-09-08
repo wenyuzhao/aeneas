@@ -5,7 +5,11 @@ open Pure
 (** The local logger *)
 let log = Logging.reorder_decls_log
 
-type fun_id = { def_id : FunDeclId.id; lp_id : (LoopId.id * bool) option }
+type fun_id = {
+  def_id : FunDeclId.id;
+  lp_id : (LoopId.id * bool) option;
+  is_precondition : bool;
+}
 [@@deriving show, ord]
 
 module FunIdOrderedType : OrderedType with type t = fun_id = struct
@@ -43,12 +47,17 @@ let compute_body_fun_deps (e : texpr) : FunIdSet.t =
         | FunOrOp (Fun fid) -> (
             match fid with
             | Pure _ -> ()
+            | Precondition fid ->
+                let id =
+                  { def_id = fid; lp_id = None; is_precondition = true }
+                in
+                ids := FunIdSet.add id !ids
             | FromLlbc (fid, lp_id) -> (
                 match fid with
                 | FunId (FBuiltin _) -> ()
                 | TraitMethod _ -> ()
                 | FunId (FRegular fid) ->
-                    let id = { def_id = fid; lp_id } in
+                    let id = { def_id = fid; lp_id; is_precondition = false } in
                     ids := FunIdSet.add id !ids))
     end
   in
@@ -70,7 +79,11 @@ let group_reorder_fun_decls (decls : fun_decl list) :
     (bool * fun_decl list) list =
   let module IntMap = MakeMap (OrderedInt) in
   let get_fun_id (decl : fun_decl) : fun_id =
-    { def_id = decl.def_id; lp_id = decl.loop_id }
+    {
+      def_id = decl.def_id;
+      lp_id = decl.loop_id;
+      is_precondition = decl.is_precondition;
+    }
   in
   (* Compute the list/set of identifiers *)
   let idl = List.map get_fun_id decls in

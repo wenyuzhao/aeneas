@@ -230,6 +230,10 @@ let () =
         " For Lean: introduce an assertion at the beginning of the functions \
          annotated with `#[target_feature(enable = \"...\")]`, to check that \
          the required target features are available." );
+      ( "-extract-preconditions",
+        Arg.Set extract_preconditions,
+        " Extract leading asserts/debug_asserts into standalone precondition \
+         definitions." );
       ( "-loops-no-rec",
         Arg.Set no_recursive_loops,
         " Never attempt to extract loops to recursive functions." );

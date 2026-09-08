@@ -3215,6 +3215,7 @@ let decompose_loops_aux (ctx : ctx) (def : fun_decl) (body : fun_body) :
         backend_attributes = def.backend_attributes;
         num_loops;
         loop_id = Some (loop.loop_id, false);
+        is_precondition = false;
         loop_pos;
         name = def.name;
         signature = loop_sig;
@@ -3554,6 +3555,7 @@ let decompose_loop_body_aux (ctx : ctx) (def : fun_decl) (body : fun_body)
       backend_attributes = def.backend_attributes;
       num_loops = def.num_loops;
       loop_id = Option.map (fun (lid, _) -> (lid, true)) def.loop_id;
+      is_precondition = false;
       loop_pos = def.loop_pos;
       name = def.name;
       signature = body_sig;

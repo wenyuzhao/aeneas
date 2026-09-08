@@ -197,59 +197,74 @@ let add_type_annotations_to_fun_decl (trans_ctx : trans_ctx)
           | GetTarget -> (f.ty, mk_known (), false)
           | TargetFeatureEnabled -> (f.ty, mk_known (), false)
         end
-      | FromLlbc (fid, lp_id) -> begin
-          (* Lookup the signature *)
-          let sg =
-            match fid with
-            | FunId (FRegular fid) ->
+      | (FromLlbc _ | Precondition _) as fun_id_case -> begin
+          let sg, generics, tr_self =
+            match fun_id_case with
+            | Precondition fid ->
                 let trans_fun =
                   [%silent_unwrap] span
                     (LlbcAst.FunDeclId.Map.find_opt fid trans_funs)
                 in
-                let trans_fun =
-                  match lp_id with
-                  | None -> trans_fun.f
-                  | Some (lp_id, true) -> Pure.LoopId.nth trans_fun.bodies lp_id
-                  | Some (lp_id, false) -> Pure.LoopId.nth trans_fun.loops lp_id
+                let trans_fun = [%silent_unwrap] span trans_fun.precondition in
+                ( trans_fun.signature,
+                  qualif.generics,
+                  UnknownTrait "add_type_annotations_to_fun_decl" )
+            | FromLlbc (fid, lp_id) ->
+                let sg =
+                  match fid with
+                  | FunId (FRegular fid) ->
+                      let trans_fun =
+                        [%silent_unwrap] span
+                          (LlbcAst.FunDeclId.Map.find_opt fid trans_funs)
+                      in
+                      let trans_fun =
+                        match lp_id with
+                        | None -> trans_fun.f
+                        | Some (lp_id, true) ->
+                            Pure.LoopId.nth trans_fun.bodies lp_id
+                        | Some (lp_id, false) ->
+                            Pure.LoopId.nth trans_fun.loops lp_id
+                      in
+                      [%ldebug "function name: " ^ trans_fun.name];
+                      trans_fun.signature
+                  | TraitMethod (tref, method_id) ->
+                      [%ldebug
+                        "method name: "
+                        ^ Charon.GAstUtils.get_method_name trans_ctx.crate
+                            tref.trait_decl_ref.trait_decl_id method_id];
+                      if Option.is_some lp_id then
+                        [%craise] span
+                          "Trying to get a loop subfunction from a method call";
+                      let method_sig =
+                        [%silent_unwrap] span
+                          (Charon.Substitute.lookup_flat_method_sig
+                             trans_ctx.crate tref.trait_decl_ref.trait_decl_id
+                             method_id)
+                      in
+                      SymbolicToPureTypes.translate_fun_sig trans_ctx fid
+                        method_sig
+                        (List.map
+                           (fun _ -> None)
+                           method_sig.item_binder_value.inputs)
+                  | FunId (FBuiltin aid) ->
+                      Builtin.BuiltinFunIdMap.find aid builtin_sigs
                 in
-                [%ldebug "function name: " ^ trans_fun.name];
-                trans_fun.signature
-            | TraitMethod (tref, method_id) ->
-                [%ldebug
-                  "method name: "
-                  ^ Charon.GAstUtils.get_method_name trans_ctx.crate
-                      tref.trait_decl_ref.trait_decl_id method_id];
-                if Option.is_some lp_id then
-                  [%craise] span
-                    "Trying to get a loop subfunction from a method call";
-                let method_sig =
-                  [%silent_unwrap] span
-                    (Charon.Substitute.lookup_flat_method_sig trans_ctx.crate
-                       tref.trait_decl_ref.trait_decl_id method_id)
+                let generics =
+                  match fid with
+                  | TraitMethod (trait_ref, _) ->
+                      append_generic_args trait_ref.trait_decl_ref.decl_generics
+                        qualif.generics
+                  | _ -> qualif.generics
                 in
-                (* TODO: we shouldn't call `SymbolicToPure` here, there should
-                   be a way to translate these signatures earlier. *)
-                SymbolicToPureTypes.translate_fun_sig trans_ctx fid method_sig
-                  (List.map (fun _ -> None) method_sig.item_binder_value.inputs)
-            | FunId (FBuiltin aid) ->
-                Builtin.BuiltinFunIdMap.find aid builtin_sigs
+                let tr_self =
+                  match fid with
+                  | TraitMethod (trait_ref, _) -> trait_ref.trait_id
+                  | _ -> UnknownTrait "add_type_annotations_to_fun_decl"
+                in
+                (sg, generics, tr_self)
+            | Pure _ -> [%internal_error] span
           in
           [%ldebug "signature: " ^ fun_sig_to_string sg];
-          (* In case this is a trait method, we need to concatenate the generics
-             args of the trait ref with the generics args of the method call itself *)
-          let generics =
-            match fid with
-            | TraitMethod (trait_ref, _) ->
-                append_generic_args trait_ref.trait_decl_ref.decl_generics
-                  qualif.generics
-            | _ -> qualif.generics
-          in
-          let tr_self =
-            match fid with
-            | TraitMethod (trait_ref, _) -> trait_ref.trait_id
-            (* Dummy, won't be used since we're not substituting for a trait. *)
-            | _ -> UnknownTrait "add_type_annotations_to_fun_decl"
-          in
           (* Replace all the unknown implicit type variables with holes.
              Note that we assume that all the trait refs are there, meaning
              we can use them to infer some implicit variables.
@@ -443,7 +458,8 @@ let add_type_annotations (trans_ctx : trans_ctx)
   List.map
     (fun (fl : pure_fun_translation) ->
       let f = add_annot fl.f in
+      let precondition = Option.map add_annot fl.precondition in
       let loops = List.map add_annot fl.loops in
       let bodies = List.map add_annot fl.bodies in
-      { f; loops; bodies })
+      { f; precondition; loops; bodies })
     trans_funs

@@ -821,8 +821,10 @@ let ctx_get_function (span : Meta.span) (id : fun_id) (ctx : extraction_ctx) :
   ctx_get (Some span) (FunId id) ctx
 
 let ctx_get_local_function (span : Meta.span) (id : A.FunDeclId.id)
-    (lp : (LoopId.id * bool) option) (ctx : extraction_ctx) : string =
-  ctx_get_function span (FromLlbc (FunId (FRegular id), lp)) ctx
+    (lp : (LoopId.id * bool) option) ?(is_precondition : bool = false)
+    (ctx : extraction_ctx) : string =
+  if is_precondition then ctx_get_function span (Precondition id) ctx
+  else ctx_get_function span (FromLlbc (FunId (FRegular id), lp)) ctx
 
 let ctx_get_type (span : Meta.span option) (id : type_id) (ctx : extraction_ctx)
     : string =
@@ -2459,11 +2461,22 @@ let ctx_add_global_decl (def : global_decl) (ctx : extraction_ctx) :
   let name = ctx_compute_global_name_no_suffix def.item_meta def.src ctx in
   ctx_add def.item_meta.span (GlobalId def.def_id) name ctx
 
+let prefix_last_ident (prefix : string) (name : string) : string =
+  match String.rindex_opt name '.' with
+  | None -> prefix ^ name
+  | Some i ->
+      String.sub name 0 (i + 1)
+      ^ prefix
+      ^ String.sub name (i + 1) (String.length name - i - 1)
+
 let ctx_compute_fun_name (def : fun_decl) (is_trait_decl_field : bool)
     (ctx : extraction_ctx) : string =
   let fname =
     ctx_compute_fun_name_no_suffix def.item_meta def.src ~is_trait_decl_field
       ctx
+  in
+  let fname =
+    if def.is_precondition then prefix_last_ident "Φ'" fname else fname
   in
   (* Compute the suffix *)
   let suffix = default_fun_suffix def.num_loops def.loop_id def.loop_pos in
@@ -2559,8 +2572,11 @@ let ctx_add_fun_decl (def : fun_decl) (ctx : extraction_ctx) : extraction_ctx =
     let def_id = def.def_id in
     (* Add the function name *)
     let def_name = ctx_compute_fun_name def false ctx in
-    let fun_id = (Pure.FunId (FRegular def_id), def.loop_id) in
-    ctx_add def.item_meta.span (FunId (FromLlbc fun_id)) def_name ctx
+    if def.is_precondition then
+      ctx_add def.item_meta.span (FunId (Precondition def_id)) def_name ctx
+    else
+      let fun_id = (Pure.FunId (FRegular def_id), def.loop_id) in
+      ctx_add def.item_meta.span (FunId (FromLlbc fun_id)) def_name ctx
 
 let ctx_compute_type_decl_name (ctx : extraction_ctx) (def : type_decl) : string
     =

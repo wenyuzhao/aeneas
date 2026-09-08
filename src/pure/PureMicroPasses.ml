@@ -264,6 +264,159 @@ let apply_passes_to_def (ctx : ctx) (def : fun_decl) :
     and the translation of the function itself simply calls the loop body. By
     marking the function as reducible, we allow tactics like [simp] or
     [progress] to see through the definition. *)
+type prefix_item = PrefixMassert of texpr | PrefixLet of bool * tpat * texpr
+
+let extract_precondition (ctx : ctx) (f : fun_decl) : fun_decl * fun_decl option
+    =
+  match (f.body, f.loop_id) with
+  | None, _ | _, Some _ -> (f, None)
+  | Some fbody, None -> (
+      let span = f.item_meta.span in
+      let _, fbody = open_all_fun_body ctx span fbody in
+      let { inputs; body } = fbody in
+      let get_massert_arg (e : texpr) : texpr option =
+        match e.e with
+        | App
+            ( { e = Qualif { id = FunOrOp (Fun (Pure Assert)); _ }; _ },
+              scrut_arg ) -> Some scrut_arg
+        | _ -> None
+      in
+      let rec decompose_lets (e : texpr) : (prefix_item * texpr) list =
+        match e.e with
+        | Let (monadic, pat, rhs, next_e) ->
+            let item =
+              match (monadic, get_massert_arg rhs) with
+              | true, Some cond -> PrefixMassert cond
+              | _ -> PrefixLet (monadic, pat, rhs)
+            in
+            (item, next_e) :: decompose_lets next_e
+        | _ -> []
+      in
+      let item_fvars (item : prefix_item) : FVarId.Set.t =
+        match item with
+        | PrefixMassert cond -> texpr_get_fvars cond
+        | PrefixLet (_, _, rhs) -> texpr_get_fvars rhs
+      in
+      let rec check_prefix_items (cont_fvars : FVarId.Set.t)
+          (items : prefix_item list) : bool =
+        match items with
+        | [] -> true
+        | PrefixMassert _ :: rest -> check_prefix_items cont_fvars rest
+        | PrefixLet (_, pat, _) :: rest ->
+            let pat_fvars = tpat_get_fvars pat in
+            let subsequent_fvars =
+              List.fold_left
+                (fun acc it -> FVarId.Set.union acc (item_fvars it))
+                FVarId.Set.empty rest
+            in
+            (not (FVarId.Set.is_empty pat_fvars))
+            && FVarId.Set.disjoint pat_fvars cont_fvars
+            && FVarId.Set.subset pat_fvars subsequent_fvars
+            && check_prefix_items cont_fvars rest
+      in
+      let items_with_conts = decompose_lets body in
+      let best = ref None in
+      let _ =
+        List.fold_left
+          (fun acc_rev (item, cont) ->
+            let acc_rev = item :: acc_rev in
+            (match item with
+            | PrefixMassert _ ->
+                let candidate = List.rev acc_rev in
+                if check_prefix_items (texpr_get_fvars cont) candidate then
+                  best := Some (candidate, cont)
+            | PrefixLet _ -> ());
+            acc_rev)
+          [] items_with_conts
+      in
+      match !best with
+      | None -> (f, None)
+      | Some (items_prefix, cont) ->
+          let rec ensure_open_pat (pat : tpat) : tpat =
+            match pat.pat with
+            | PIgnored ->
+                let id = ctx.fresh_fvar_id () in
+                let fv : fvar = { id; basename = None; ty = pat.ty } in
+                { pat with pat = POpen (fv, None) }
+            | PAdt av ->
+                let fields = List.map ensure_open_pat av.fields in
+                { pat with pat = PAdt { av with fields } }
+            | PConstant _ | POpen _ | PBound _ -> pat
+          in
+          let inputs = List.map ensure_open_pat inputs in
+          let pre_body_expr =
+            List.fold_right
+              (fun item acc ->
+                match item with
+                | PrefixMassert cond ->
+                    let massert_expr = mk_massert_texpr span cond in
+                    let ignored_pat = mk_ignored_pat mk_unit_ty in
+                    {
+                      e = Let (true, ignored_pat, massert_expr, acc);
+                      ty = mk_result_ty mk_unit_ty;
+                    }
+                | PrefixLet (monadic, pat, rhs) ->
+                    {
+                      e = Let (monadic, pat, rhs, acc);
+                      ty = mk_result_ty mk_unit_ty;
+                    })
+              items_prefix
+              (mk_result_ok_texpr span mk_unit_texpr)
+          in
+          let pre_body =
+            close_all_fun_body span { inputs; body = pre_body_expr }
+          in
+          let pre_sig : fun_sig =
+            {
+              f.signature with
+              output = mk_result_ty mk_unit_ty;
+              fwd_info =
+                {
+                  effect_info =
+                    { can_fail = true; can_diverge = false; is_rec = false };
+                  ignore_output = false;
+                };
+              back_effect_info = RegionGroupId.Map.empty;
+            }
+          in
+          let pre_decl : fun_decl =
+            {
+              f with
+              is_precondition = true;
+              name = "Φ'" ^ f.name;
+              signature = pre_sig;
+              body = Some pre_body;
+            }
+          in
+          let args =
+            List.map
+              (fun pat -> [%silent_unwrap] span (tpat_to_texpr span pat))
+              inputs
+          in
+          let generic_args = generic_args_of_params f.signature.generics in
+          let fn_ty = mk_arrows f.signature.inputs (mk_result_ty mk_unit_ty) in
+          let fn_expr =
+            {
+              e =
+                Qualif
+                  {
+                    id = FunOrOp (Fun (Precondition f.def_id));
+                    generics = generic_args;
+                  };
+              ty = fn_ty;
+            }
+          in
+          let call_expr = [%add_loc] mk_apps span fn_expr args in
+          let ignored_pat = mk_ignored_pat mk_unit_ty in
+          let new_main_body_expr =
+            { e = Let (true, ignored_pat, call_expr, cont); ty = cont.ty }
+          in
+          let new_main_body =
+            close_all_fun_body span { inputs; body = new_main_body_expr }
+          in
+          let new_f = { f with body = Some new_main_body } in
+          (new_f, Some pre_decl))
+
 let compute_reducible (_ctx : ctx) (transl : pure_fun_translation list) :
     pure_fun_translation list =
   let update_one (trans : pure_fun_translation) : pure_fun_translation =
@@ -476,7 +629,13 @@ let apply_passes_to_pure_fun_translations (crate : LlbcAst.crate)
       "After decomposing loops:\n\n"
       ^ String.concat "\n\n" (List.map (fun_decl_to_string ctx) funs)];
 
-    let trans : pure_fun_translation = { f; loops; bodies } in
+    let f, precondition =
+      if !Config.extract_preconditions && not f.is_global_decl_body then
+        extract_precondition ctx f
+      else (f, None)
+    in
+
+    let trans : pure_fun_translation = { f; precondition; loops; bodies } in
 
     (* Introduce the fuel and the state, if necessary.
 

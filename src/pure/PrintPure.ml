@@ -883,6 +883,7 @@ let regular_fun_id_to_string (env : fmt_env) (fun_id : fun_id) : string =
       in
       f ^ fun_suffix lp_id
   | Pure fid -> pure_builtin_fun_id_to_string fid
+  | Precondition fid -> "Φ'" ^ fun_decl_id_to_string env fid
 
 let cast_kind_to_string (env : fmt_env) (kind : cast_kind) : string =
   let src, tgt =

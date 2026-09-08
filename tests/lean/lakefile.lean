@@ -96,6 +96,7 @@ package «tests» {}
 @[default_target] lean_lib OverflowingOps
 @[default_target] lean_lib Paper
 @[default_target] lean_lib PoloniusList
+@[default_target] lean_lib Preconditions
 @[default_target] lean_lib Print
 @[default_target] lean_lib Range
 @[default_target] lean_lib RenameAttribute

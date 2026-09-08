@@ -77,7 +77,8 @@ let extract_fun_decl_register_names (ctx : extraction_ctx)
          Note: if [def.f] is a global initializer body, [ctx_add_fun_decl]
          skips it (the global is registered separately as a global); the loops
          and bodies are ordinary functions and are registered normally. *)
-      let funs = (def.f :: def.loops) @ def.bodies in
+      let pre = Option.to_list def.precondition in
+      let funs = pre @ (def.f :: def.loops) @ def.bodies in
       (* Register the decrease clauses *)
       let ctx = List.fold_left register_decreases ctx funs in
       (* Register the name of the function and the loops *)
@@ -999,6 +1000,14 @@ and extract_function_call (span : Meta.span) (ctx : extraction_ctx)
       let explicit =
         try
           match fun_id with
+          | Precondition fun_decl_id -> begin
+              let trans_fun =
+                [%silent_unwrap] span (ctx_lookup_fun_decl_info ctx fun_decl_id)
+              in
+              let trans_fun = [%silent_unwrap] span trans_fun.precondition in
+              let explicit = trans_fun.signature.explicit_info in
+              Some (adjust_explicit_info explicit false generics)
+            end
           | FromLlbc (FunId (FRegular fun_decl_id), lp_id) -> begin
               (* Lookup the function to retrieve the signature information *)
               let trans_fun =
@@ -1066,7 +1075,7 @@ and extract_function_call (span : Meta.span) (ctx : extraction_ctx)
       *)
       let types_explicit_traits =
         match fun_id with
-        | FromLlbc (FunId (FRegular id), _) ->
+        | FromLlbc (FunId (FRegular id), _) | Precondition id ->
             fun_builtin_filter_types_trait_clauses (ty_to_string ctx)
               (trait_ref_to_string ctx) id generics.types explicit
               generics.trait_refs ctx
@@ -2084,7 +2093,8 @@ let extract_fun_decl_gen (ctx : extraction_ctx) (fmt : F.formatter)
   [%sanity_check] def.item_meta.span (not def.is_global_decl_body);
   (* Retrieve the function name *)
   let def_name =
-    ctx_get_local_function def.item_meta.span def.def_id def.loop_id ctx
+    ctx_get_local_function def.item_meta.span def.def_id def.loop_id
+      ~is_precondition:def.is_precondition ctx
   in
   [%ltrace "Extracting function: " ^ def_name];
   (* Open the binders - it is easier to only manipulate variables which have unique ids *)
@@ -2390,7 +2400,8 @@ let extract_fun_decl_hol4_opaque (ctx : extraction_ctx) (fmt : F.formatter)
     (def : fun_decl) : unit =
   (* Retrieve the definition name *)
   let def_name =
-    ctx_get_local_function def.item_meta.span def.def_id def.loop_id ctx
+    ctx_get_local_function def.item_meta.span def.def_id def.loop_id
+      ~is_precondition:def.is_precondition ctx
   in
   (* Open the binders - it is easier to only manipulate variables which have unique ids *)
   let _, fresh_fvar_id = FVarId.fresh_stateful_generator () in

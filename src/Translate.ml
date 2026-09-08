@@ -983,7 +983,11 @@ let export_functions_group (fmt : Format.formatter) (config : gen_config)
        the declarations introduced for the loops) *)
     let decls =
       List.concat
-        (List.map (fun f -> List.append (f.loops @ f.bodies) [ f.f ]) pure_ls)
+        (List.map
+           (fun f ->
+             let pre = Option.to_list f.precondition in
+             pre @ f.loops @ f.bodies @ [ f.f ])
+           pure_ls)
     in
 
     (* Extract the function definitions *)

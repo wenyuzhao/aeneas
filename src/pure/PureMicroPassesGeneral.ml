@@ -3140,21 +3140,27 @@ let add_fuel (ctx : ctx) (trans : pure_fun_translation) : pure_fun_translation =
 
   (* Add the fuel and the state *)
   let f = add_fuel_one ctx loops_map trans.f in
+  let precondition =
+    Option.map (add_fuel_one ctx loops_map) trans.precondition
+  in
   let loops = List.map (add_fuel_one ctx loops_map) trans.loops in
   let bodies = List.map (add_fuel_one ctx loops_map) trans.bodies in
 
   (* Decompose the monadic let-bindings if necessary (Coq needs this) *)
-  let f, loops, bodies =
+  let f, precondition, loops, bodies =
     if !Config.decompose_monadic_let_bindings then
       let f = decompose_monadic_let_bindings ctx f in
+      let precondition =
+        Option.map (decompose_monadic_let_bindings ctx) precondition
+      in
       let loops = List.map (decompose_monadic_let_bindings ctx) loops in
       let bodies = List.map (decompose_monadic_let_bindings ctx) bodies in
-      (f, loops, bodies)
-    else (f, loops, bodies)
+      (f, precondition, loops, bodies)
+    else (f, precondition, loops, bodies)
   in
 
   (* *)
-  { f; loops; bodies }
+  { f; precondition; loops; bodies }
 
 (** Perform the following transformation:
 

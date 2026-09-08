@@ -1247,6 +1247,8 @@ and fun_id =
           backward function, [None] if it is a forward function. *)
   | Pure of pure_builtin_fun_id
       (** A function only used in the pure translation *)
+  | Precondition of fun_decl_id
+      (** The extracted precondition definition for a function *)
 
 (** A function or an operation id *)
 and fun_or_op_id = Fun of fun_id | Unop of unop | Binop of binop
@@ -1832,6 +1834,8 @@ type fun_decl = {
           boolean [is_body] is [true] when this definition is the auxiliary
           function for the loop body continuation (i.e., the continuation used
           by the loop fixed point operator). *)
+  is_precondition : bool;
+      (** [true] if this definition is an extracted precondition function *)
   loop_pos : int list;
       (** The position of this loop (empty if this is not a loop)
 

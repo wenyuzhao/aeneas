@@ -342,6 +342,10 @@ let lift_pure_function_calls = ref false
     ]} *)
 let intro_massert = ref true
 
+(** Extract leading assertions into a standalone precondition definition (e.g.,
+    [Φ'foo]). *)
+let extract_preconditions = ref false
+
 (** Introduce assertions checking that the target features required by a
     function are available.
 
