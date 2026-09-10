@@ -25,8 +25,14 @@ inductive ScalarTy where
 | U8 | U16 | U32 | U64 | U128 | Usize
 | I8 | I16 | I32 | I64 | I128 | Isize
 
-def mkScalarValue (ty : ScalarTy) (val : Nat) : TermElabM Term := do
-  let value := Syntax.mkNumLit (toString val)
+def mkScalarValue (ty : ScalarTy) (val : Int) : TermElabM Term := do
+  let value : Term ←
+    if val ≥ 0 then
+      let n := Syntax.mkNumLit (toString val.toNat)
+      `($n)
+    else
+      let n := Syntax.mkNumLit (toString (-val).toNat)
+      `((-$n))
   match ty with
   | .U8 => `($(value)#u8)
   | .U16 => `($(value)#u16)
@@ -60,7 +66,7 @@ def mkScalarTy (ty : ScalarTy) : TermElabM Term := do
 
 This function is adapted from `Lean.Elab.Deriving.BEq`.
 -/
-def generateReadDiscriminantCmds (declName : Name) (ty : ScalarTy) (discrValues : Option (List Nat)) :
+def generateReadDiscriminantCmds (declName : Name) (ty : ScalarTy) (discrValues : Option (List Int)) :
   TermElabM (List Syntax) := do
   -- Lookup the declaration, which should be an inductive
   let env ← getEnv
@@ -89,7 +95,7 @@ def generateReadDiscriminantCmds (declName : Name) (ty : ScalarTy) (discrValues 
   -- Generate the value of the discriminant for each variant
   let discrValues ← do
     match discrValues with
-    | none => pure (indVal.ctors.mapIdx (fun n _ => n))
+    | none => pure (indVal.ctors.mapIdx (fun n _ => Int.ofNat n))
     | some values =>
       if values.length ≠ indVal.ctors.length then
         throwError "Invalid number of values provided ({discrValues}): got {values.length}, expected {indVal.ctors.length}"
@@ -134,12 +140,13 @@ def generateReadDiscriminantCmds (declName : Name) (ty : ScalarTy) (discrValues 
 
 /-- Given an inductive declaration name and an optional list of values, generate an instance
 of `Std.Discriminant`. If the list of values is not provided, we use values `0`, `1`, etc. -/
-def generateReadDiscriminant (declName : Name) (ty : ScalarTy) (discrValues : Option (List Nat)) :
+def generateReadDiscriminant (declName : Name) (ty : ScalarTy) (discrValues : Option (List Int)) :
   CommandElabM Unit := do
   let cmds ← liftTermElabM (generateReadDiscriminantCmds declName ty discrValues)
   cmds.forM elabCommand
 
-syntax (name := readDiscriminant) "discriminant" ident ("["num,*"]")? : attr
+syntax discrVal := "-"? num
+syntax (name := readDiscriminant) "discriminant" ident ("["discrVal,*"]")? : attr
 
 def elabTypeToken (stx : Syntax) : AttrM ScalarTy :=
   match stx.getId with
@@ -157,7 +164,13 @@ def elabTypeToken (stx : Syntax) : AttrM ScalarTy :=
   | `isize => pure ScalarTy.Isize
   | _ => throwUnsupportedSyntax
 
-def elabReadDiscriminantAttribute (stx : Syntax) : AttrM (ScalarTy × Option (List Nat)) :=
+def elabDiscrVal (stx : Syntax) : AttrM Int :=
+  match stx with
+  | `(discrVal| $n:num) => pure (Int.ofNat n.getNat)
+  | `(discrVal| -$n:num) => pure (- Int.ofNat n.getNat)
+  | _ => throwUnsupportedSyntax
+
+def elabReadDiscriminantAttribute (stx : Syntax) : AttrM (ScalarTy × Option (List Int)) :=
   withRef stx do
     match stx with
     | `(attr| discriminant $ty) => do
@@ -165,7 +178,8 @@ def elabReadDiscriminantAttribute (stx : Syntax) : AttrM (ScalarTy × Option (Li
       pure (← elabTypeToken ty, none)
     | `(attr| discriminant $ty [$x,*]) => do
       trace[Discriminant] "Elaborating discriminant attribute with values: {x.getElems}"
-      pure (← elabTypeToken ty, some ((x.getElems.toList.map Syntax.isNatLit?).map Option.get!))
+      let values ← x.getElems.toList.mapM elabDiscrVal
+      pure (← elabTypeToken ty, some values)
     | _ => throwUnsupportedSyntax
 
 initialize discriminantAttribute : AttributeImpl ← do
@@ -204,14 +218,41 @@ namespace Test
   | Variant1
   | Variant2
 
+  inductive Foo4 where
+  | CoarseSlower | MediumSlower | FineSlower | NoChange | FineFaster | MediumFaster | CoarseFaster
+
+  inductive Foo5 where
+  | Min | NegOne | Zero | One | Max
+
+  inductive Foo6 where
+  | Neg | Zero | Pos
+
   #eval generateReadDiscriminant ``Foo .U8 (some [3, 4])
   #eval generateReadDiscriminant ``Foo1 .I8 none
   #eval generateReadDiscriminant ``Foo2 .I16 none
   #eval generateReadDiscriminant ``Foo3 .Isize (some [3, 4])
+  #eval generateReadDiscriminant ``Foo4 .Isize (some [-3, -2, -1, 0, 1, 2, 3])
+  #eval generateReadDiscriminant ``Foo5 .I8 (some [-128, -1, 0, 1, 127])
+  #eval generateReadDiscriminant ``Foo6 .I32 (some [-100, 0, 100])
 
   #assert read_discriminant Foo2.Variant1 = 0#i16
   #assert read_discriminant Foo3.Variant1 = 3#isize
   #assert read_discriminant Foo3.Variant2 = 4#isize
+  #assert read_discriminant Foo4.CoarseSlower = (-3)#isize
+  #assert read_discriminant Foo4.MediumSlower = (-2)#isize
+  #assert read_discriminant Foo4.FineSlower = (-1)#isize
+  #assert read_discriminant Foo4.NoChange = 0#isize
+  #assert read_discriminant Foo4.FineFaster = 1#isize
+  #assert read_discriminant Foo4.MediumFaster = 2#isize
+  #assert read_discriminant Foo4.CoarseFaster = 3#isize
+  #assert read_discriminant Foo5.Min = (-128)#i8
+  #assert read_discriminant Foo5.NegOne = (-1)#i8
+  #assert read_discriminant Foo5.Zero = 0#i8
+  #assert read_discriminant Foo5.One = 1#i8
+  #assert read_discriminant Foo5.Max = 127#i8
+  #assert read_discriminant Foo6.Neg = (-100)#i32
+  #assert read_discriminant Foo6.Zero = 0#i32
+  #assert read_discriminant Foo6.Pos = 100#i32
 
 end Test
 

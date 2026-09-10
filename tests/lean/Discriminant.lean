@@ -86,4 +86,49 @@ def AlertLevelU8.Insts.CoreCmpPartialEqAlertLevelU8 : core.cmp.PartialEq
   eq := AlertLevelU8.Insts.CoreCmpPartialEqAlertLevelU8.eq
 }
 
+/-- [discriminant::SignedDiscr]
+    Source: 'tests/src/discriminant.rs', lines 21:0-29:1
+    Visibility: public -/
+@[discriminant isize [-3,-2,-1,0,1,2,3]]
+inductive SignedDiscr where
+| NegThree : SignedDiscr
+| NegTwo : SignedDiscr
+| NegOne : SignedDiscr
+| Zero : SignedDiscr
+| PosOne : SignedDiscr
+| PosTwo : SignedDiscr
+| PosThree : SignedDiscr
+
+#assert read_discriminant SignedDiscr.NegThree = (-3)#isize
+#assert read_discriminant SignedDiscr.NegTwo = (-2)#isize
+#assert read_discriminant SignedDiscr.NegOne = (-1)#isize
+#assert read_discriminant SignedDiscr.Zero = 0#isize
+#assert read_discriminant SignedDiscr.PosOne = 1#isize
+#assert read_discriminant SignedDiscr.PosTwo = 2#isize
+#assert read_discriminant SignedDiscr.PosThree = 3#isize
+
+@[discriminant i8 [-128,-1,0,1,127]]
+inductive SignedI8Discr where
+| Min : SignedI8Discr
+| NegOne : SignedI8Discr
+| Zero : SignedI8Discr
+| One : SignedI8Discr
+| Max : SignedI8Discr
+
+#assert read_discriminant SignedI8Discr.Min = (-128)#i8
+#assert read_discriminant SignedI8Discr.NegOne = (-1)#i8
+#assert read_discriminant SignedI8Discr.Zero = 0#i8
+#assert read_discriminant SignedI8Discr.One = 1#i8
+#assert read_discriminant SignedI8Discr.Max = 127#i8
+
+@[discriminant i32 [-1000,0,1000]]
+inductive SignedI32Discr where
+| Low : SignedI32Discr
+| Mid : SignedI32Discr
+| High : SignedI32Discr
+
+#assert read_discriminant SignedI32Discr.Low = (-1000)#i32
+#assert read_discriminant SignedI32Discr.Mid = 0#i32
+#assert read_discriminant SignedI32Discr.High = 1000#i32
+
 end discriminant
