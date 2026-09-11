@@ -636,23 +636,39 @@ let simplify_duplicate_calls_visitor (_ctx : ctx) (def : fun_decl) =
 
     method! visit_Let env monadic pat bound next =
       let bound = self#visit_texpr env bound in
+      (* Do not propagate expression mappings across [massert] boundaries.
+         Otherwise, temporary bindings introduced to evaluate an assertion
+         (e.g., inside [assert_eq!(...)]) would be reused for expressions in
+         the subsequent function body, coupling the assertion's temporaries
+         to the body continuation and preventing [extract_precondition] from
+         extracting leading assertions as preconditions. *)
+      let is_massert =
+        match bound.e with
+        | App
+            ( { e = Qualif { id = FunOrOp (Fun (Pure Assert)); _ }; _ },
+              _ ) ->
+            true
+        | _ -> false
+      in
       (* Register the function call if the pattern doesn't contain ignored
          variables *)
       let env =
-        let factor =
-          monadic
-          ||
-          match destruct_apps bound with
-          | { e = FVar _; _ }, _ :: _ ->
-              (* May be a backward function call *)
-              true
-          | _ -> false
-        in
-        if factor then
-          match tpat_to_texpr def.item_meta.span pat with
-          | None -> env
-          | Some pat_expr -> TExprMap.add bound (monadic, pat_expr) env
-        else env
+        if is_massert then TExprMap.empty
+        else
+          let factor =
+            monadic
+            ||
+            match destruct_apps bound with
+            | { e = FVar _; _ }, _ :: _ ->
+                (* May be a backward function call *)
+                true
+            | _ -> false
+          in
+          if factor then
+            match tpat_to_texpr def.item_meta.span pat with
+            | None -> env
+            | Some pat_expr -> TExprMap.add bound (monadic, pat_expr) env
+          else env
       in
       let next = self#visit_texpr env next in
       Let (monadic, pat, bound, next)

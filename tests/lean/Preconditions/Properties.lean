@@ -21,4 +21,11 @@ theorem left_shift_one_verify (v : Std.I32) (h : Φ'left_shift_one v = ok ()) :
     exact h_eq
   bv_tac 32
 
+
+theorem duplicate_call_after_assert_verify (h : Φ'duplicate_call_after_assert = ok ()) :
+    duplicate_call_after_assert ⦃ _ => True ⦄ := by
+  unfold duplicate_call_after_assert make_val
+  rw [h]
+  step*
+
 end preconditions

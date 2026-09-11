@@ -140,4 +140,26 @@ def no_precondition (x : Std.I32) : Result Std.I32 := do
   massert (y > 0#i32)
   ok y
 
+/-- [preconditions::make_val]:
+    Source: 'tests/src/preconditions.rs', lines 62:0-64:1
+    Visibility: public -/
+def make_val : Result Std.I32 := do
+  ok 0#i32
+
+/-- [preconditions::duplicate_call_after_assert]:
+    Source: 'tests/src/preconditions.rs', lines 66:0-70:1
+    Visibility: public -/
+def Φ'duplicate_call_after_assert : Result Unit := do
+  let left_val ← make_val
+  massert (left_val = 0#i32)
+  ok ()
+
+/-- [preconditions::duplicate_call_after_assert]:
+    Source: 'tests/src/preconditions.rs', lines 66:0-70:1
+    Visibility: public -/
+def duplicate_call_after_assert : Result Unit := do
+  Φ'duplicate_call_after_assert
+  let val ← make_val
+  massert (val = 0#i32)
+
 end preconditions

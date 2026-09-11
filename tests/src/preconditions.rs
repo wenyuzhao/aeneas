@@ -55,3 +55,16 @@ pub fn no_precondition(x: i32) -> i32 {
     assert!(y > 0);
     y
 }
+
+/// 7. Duplicate function call after leading assertion: `simplify_duplicate_calls`
+/// must not merge the body call with the assertion's internal temporary across `massert`,
+/// so `Φ'duplicate_call_after_assert` is properly extracted.
+pub fn make_val() -> i32 {
+    0
+}
+
+pub fn duplicate_call_after_assert() {
+    assert_eq!(make_val(), 0);
+    let val = make_val();
+    assert!(val == 0);
+}
