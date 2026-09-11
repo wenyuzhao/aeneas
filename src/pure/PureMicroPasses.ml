@@ -323,6 +323,38 @@ let extract_precondition (ctx : ctx) (f : fun_decl) : fun_decl * fun_decl option
               && FVarId.Set.subset pat_fvars subsequent_fvars
               && check_prefix_items cont_fvars rest
         in
+        let rec contains_aeneas_require (e : texpr) : bool =
+          if Option.is_some (is_aeneas_require_call ctx e) then true
+          else
+            match e.e with
+            | FVar _ | BVar _ | CVar _ | Const _ | Qualif _ -> false
+            | App (fn_e, arg_e) ->
+                contains_aeneas_require fn_e || contains_aeneas_require arg_e
+            | Lambda (_, lbody) -> contains_aeneas_require lbody
+            | Let (_, _, rhs, next) ->
+                contains_aeneas_require rhs || contains_aeneas_require next
+            | Switch (scrut, sb) -> (
+                contains_aeneas_require scrut
+                ||
+                match sb with
+                | If (e1, e2) ->
+                    contains_aeneas_require e1 || contains_aeneas_require e2
+                | Match branches ->
+                    List.exists
+                      (fun (b : match_branch) ->
+                        contains_aeneas_require b.branch)
+                      branches)
+            | Loop loop ->
+                List.exists contains_aeneas_require loop.inputs
+                || contains_aeneas_require loop.loop_body.loop_body
+            | StructUpdate su ->
+                Option.fold ~none:false ~some:contains_aeneas_require su.init
+                || List.exists
+                     (fun (_, fe) -> contains_aeneas_require fe)
+                     su.updates
+            | Meta (_, sub) -> contains_aeneas_require sub
+            | EError _ -> false
+        in
         let items_with_conts = decompose_lets body in
         let has_explicit_require =
           List.exists
@@ -348,8 +380,28 @@ let extract_precondition (ctx : ctx) (f : fun_decl) : fun_decl * fun_decl option
             [] items_with_conts
         in
         match !best with
-        | None -> (f, None)
+        | None ->
+            if contains_aeneas_require body then
+              [%craise] span
+                "Precondition 'requires!' / '__aeneas_require' must appear at the beginning of the function body";
+            (f, None)
         | Some (items_prefix, cont) ->
+            let _ =
+              List.fold_left
+                (fun seen_massert item ->
+                  match item with
+                  | PrefixMassert _ -> true
+                  | PrefixRequire _ ->
+                      if seen_massert then
+                        [%craise] span
+                          "Precondition 'requires!' / '__aeneas_require' must appear at the beginning of the function body (before any 'assert!' statements)";
+                      seen_massert
+                  | PrefixLet _ -> seen_massert)
+                false items_prefix
+            in
+            if contains_aeneas_require cont then
+              [%craise] span
+                "Precondition 'requires!' / '__aeneas_require' must appear at the beginning of the function body";
             let rec ensure_open_pat (pat : tpat) : tpat =
               match pat.pat with
               | PIgnored ->
@@ -707,7 +759,7 @@ let apply_passes_to_pure_fun_translations (crate : LlbcAst.crate)
 
     let f, precondition =
       if !Config.extract_preconditions && not f.is_global_decl_body then
-        extract_precondition ctx f
+        try extract_precondition ctx f with Errors.CFailure _ -> (f, None)
       else (f, None)
     in
 
