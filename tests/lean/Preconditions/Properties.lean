@@ -12,6 +12,7 @@ theorem left_shift_one_verify (v : Std.I32) (h : Φ'left_shift_one v = ok ()) :
   simp only [bind_tc_ok] at h ⊢
   split at h <;> try contradiction
   rename_i h0
+  simp only [bind_tc_ok] at h
   split at h <;> try contradiction
   rename_i h1
   step*
@@ -38,5 +39,15 @@ theorem with_aeneas_require_verify (x y : Std.I32) (h : Φ'with_aeneas_require x
   split at h <;> try contradiction
   split at h <;> try contradiction
   rcases h_sum : (x + y) with ⟨sum⟩ | _ | _ <;> simp_all
+
+theorem require_after_assert_verify (x : Std.I32) (h : Φ'require_after_assert x = ok ()) :
+    require_after_assert x ⦃ _ => True ⦄ := by
+  unfold require_after_assert
+  rw [h]
+  unfold Φ'require_after_assert massert at h
+  simp only [bind_tc_ok] at h ⊢
+  split at h <;> try contradiction
+  rename_i h0
+  step*
 
 end preconditions

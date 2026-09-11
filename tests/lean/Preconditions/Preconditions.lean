@@ -18,40 +18,40 @@ set_option maxRecDepth 2048
 namespace preconditions
 
 /-- [preconditions::ComplexStruct]
-    Source: 'tests/src/preconditions.rs', lines 6:0-8:1
+    Source: 'tests/src/preconditions.rs', lines 11:0-13:1
     Visibility: public -/
 structure ComplexStruct where
   x : Std.I32
 
 /-- [preconditions::{impl core::clone::Clone for preconditions::ComplexStruct}::clone]:
-    Source: 'tests/src/preconditions.rs', lines 5:15-5:20
+    Source: 'tests/src/preconditions.rs', lines 10:15-10:20
     Visibility: public -/
 def ComplexStruct.Insts.CoreCloneClone.clone
   (self : ComplexStruct) : Result ComplexStruct := do
   ok self
 
 /-- Trait implementation: [preconditions::{impl core::clone::Clone for preconditions::ComplexStruct}]
-    Source: 'tests/src/preconditions.rs', lines 5:15-5:20 -/
+    Source: 'tests/src/preconditions.rs', lines 10:15-10:20 -/
 @[reducible]
 def ComplexStruct.Insts.CoreCloneClone : core.clone.Clone ComplexStruct := {
   clone := ComplexStruct.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [preconditions::{impl core::marker::Copy for preconditions::ComplexStruct}]
-    Source: 'tests/src/preconditions.rs', lines 5:9-5:13 -/
+    Source: 'tests/src/preconditions.rs', lines 10:9-10:13 -/
 @[reducible]
 def ComplexStruct.Insts.CoreMarkerCopy : core.marker.Copy ComplexStruct := {
   cloneInst := ComplexStruct.Insts.CoreCloneClone
 }
 
 /-- [preconditions::bar]:
-    Source: 'tests/src/preconditions.rs', lines 10:0-12:1
+    Source: 'tests/src/preconditions.rs', lines 15:0-17:1
     Visibility: public -/
 def bar (b : ComplexStruct) : Result Bool := do
   ok (b.x > 0#i32)
 
 /-- [preconditions::foo]:
-    Source: 'tests/src/preconditions.rs', lines 15:0-19:1
+    Source: 'tests/src/preconditions.rs', lines 20:0-24:1
     Visibility: public -/
 def Φ'foo (a : Std.I32) (b : ComplexStruct) : Result Unit := do
   massert (a > 12#i32)
@@ -60,22 +60,24 @@ def Φ'foo (a : Std.I32) (b : ComplexStruct) : Result Unit := do
   ok ()
 
 /-- [preconditions::foo]:
-    Source: 'tests/src/preconditions.rs', lines 15:0-19:1
+    Source: 'tests/src/preconditions.rs', lines 20:0-24:1
     Visibility: public -/
 def foo (a : Std.I32) (b : ComplexStruct) : Result Std.I32 := do
   Φ'foo a b
   a + b.x
 
 /-- [preconditions::left_shift_one]:
-    Source: 'tests/src/preconditions.rs', lines 22:0-27:1
+    Source: 'tests/src/preconditions.rs', lines 27:0-32:1
     Visibility: public -/
 def Φ'left_shift_one (v : Std.I32) : Result Unit := do
-  massert (v >= 0#i32)
-  massert (v < 1024#i32)
+  let b ← if v >= 0#i32
+            then ok (v < 1024#i32)
+            else ok false
+  massert b
   ok ()
 
 /-- [preconditions::left_shift_one]:
-    Source: 'tests/src/preconditions.rs', lines 22:0-27:1
+    Source: 'tests/src/preconditions.rs', lines 27:0-32:1
     Visibility: public -/
 def left_shift_one (v : Std.I32) : Result Std.I32 := do
   Φ'left_shift_one v
@@ -85,7 +87,7 @@ def left_shift_one (v : Std.I32) : Result Std.I32 := do
   ok r
 
 /-- [preconditions::with_debug_assert]:
-    Source: 'tests/src/preconditions.rs', lines 30:0-34:1
+    Source: 'tests/src/preconditions.rs', lines 35:0-39:1
     Visibility: public -/
 def Φ'with_debug_assert (x : Std.U32) (y : Std.U32) : Result Unit := do
   massert (x <= 1000#u32)
@@ -93,23 +95,23 @@ def Φ'with_debug_assert (x : Std.U32) (y : Std.U32) : Result Unit := do
   ok ()
 
 /-- [preconditions::with_debug_assert]:
-    Source: 'tests/src/preconditions.rs', lines 30:0-34:1
+    Source: 'tests/src/preconditions.rs', lines 35:0-39:1
     Visibility: public -/
 def with_debug_assert (x : Std.U32) (y : Std.U32) : Result Std.U32 := do
   Φ'with_debug_assert x y
   x + y
 
 /-- [preconditions::with_assert_eq_ne]:
-    Source: 'tests/src/preconditions.rs', lines 37:0-41:1
+    Source: 'tests/src/preconditions.rs', lines 42:0-46:1
     Visibility: public -/
 def Φ'with_assert_eq_ne
   (a : Std.I32) (b : Std.I32) (c : Std.I32) : Result Unit := do
   massert (a = b)
-  massert (¬ (c = 0#i32))
+  massert (c != 0#i32)
   ok ()
 
 /-- [preconditions::with_assert_eq_ne]:
-    Source: 'tests/src/preconditions.rs', lines 37:0-41:1
+    Source: 'tests/src/preconditions.rs', lines 42:0-46:1
     Visibility: public -/
 def with_assert_eq_ne
   (a : Std.I32) (b : Std.I32) (c : Std.I32) : Result Std.I32 := do
@@ -117,14 +119,14 @@ def with_assert_eq_ne
   a + c
 
 /-- [preconditions::partial_extraction]:
-    Source: 'tests/src/preconditions.rs', lines 45:0-50:1
+    Source: 'tests/src/preconditions.rs', lines 50:0-55:1
     Visibility: public -/
 def Φ'partial_extraction (x : Std.I32) : Result Unit := do
   massert (x > 0#i32)
   ok ()
 
 /-- [preconditions::partial_extraction]:
-    Source: 'tests/src/preconditions.rs', lines 45:0-50:1
+    Source: 'tests/src/preconditions.rs', lines 50:0-55:1
     Visibility: public -/
 def partial_extraction (x : Std.I32) : Result Std.I32 := do
   Φ'partial_extraction x
@@ -133,7 +135,7 @@ def partial_extraction (x : Std.I32) : Result Std.I32 := do
   ok y
 
 /-- [preconditions::no_precondition]:
-    Source: 'tests/src/preconditions.rs', lines 53:0-57:1
+    Source: 'tests/src/preconditions.rs', lines 58:0-62:1
     Visibility: public -/
 def no_precondition (x : Std.I32) : Result Std.I32 := do
   let y ← x * 2#i32
@@ -141,21 +143,21 @@ def no_precondition (x : Std.I32) : Result Std.I32 := do
   ok y
 
 /-- [preconditions::make_val]:
-    Source: 'tests/src/preconditions.rs', lines 62:0-64:1
+    Source: 'tests/src/preconditions.rs', lines 67:0-69:1
     Visibility: public -/
 def make_val : Result Std.I32 := do
   ok 0#i32
 
 /-- [preconditions::duplicate_call_after_assert]:
-    Source: 'tests/src/preconditions.rs', lines 66:0-70:1
+    Source: 'tests/src/preconditions.rs', lines 71:0-75:1
     Visibility: public -/
 def Φ'duplicate_call_after_assert : Result Unit := do
-  let left_val ← make_val
-  massert (left_val = 0#i32)
+  let i ← make_val
+  massert (i = 0#i32)
   ok ()
 
 /-- [preconditions::duplicate_call_after_assert]:
-    Source: 'tests/src/preconditions.rs', lines 66:0-70:1
+    Source: 'tests/src/preconditions.rs', lines 71:0-75:1
     Visibility: public -/
 def duplicate_call_after_assert : Result Unit := do
   Φ'duplicate_call_after_assert
@@ -163,7 +165,7 @@ def duplicate_call_after_assert : Result Unit := do
   massert (val = 0#i32)
 
 /-- [preconditions::with_aeneas_require]:
-    Source: 'tests/src/preconditions.rs', lines 81:0-88:1
+    Source: 'tests/src/preconditions.rs', lines 80:0-87:1
     Visibility: public -/
 def Φ'with_aeneas_require (x : Std.I32) (y : Std.I32) : Result Unit := do
   massert (x > 0#i32)
@@ -173,12 +175,27 @@ def Φ'with_aeneas_require (x : Std.I32) (y : Std.I32) : Result Unit := do
   ok ()
 
 /-- [preconditions::with_aeneas_require]:
-    Source: 'tests/src/preconditions.rs', lines 81:0-88:1
+    Source: 'tests/src/preconditions.rs', lines 80:0-87:1
     Visibility: public -/
 def with_aeneas_require (x : Std.I32) (y : Std.I32) : Result Std.I32 := do
   Φ'with_aeneas_require x y
   let sum ← x + y
   massert (y > 0#i32)
   ok sum
+
+/-- [preconditions::require_after_assert]:
+    Source: 'tests/src/preconditions.rs', lines 92:0-96:1
+    Visibility: public -/
+def Φ'require_after_assert (x : Std.I32) : Result Unit := do
+  massert (x > 0#i32)
+  ok ()
+
+/-- [preconditions::require_after_assert]:
+    Source: 'tests/src/preconditions.rs', lines 92:0-96:1
+    Visibility: public -/
+def require_after_assert (x : Std.I32) : Result Std.I32 := do
+  Φ'require_after_assert x
+  massert (x != 0#i32)
+  ok x
 
 end preconditions

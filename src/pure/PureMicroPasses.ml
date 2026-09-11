@@ -266,7 +266,6 @@ let apply_passes_to_def (ctx : ctx) (def : fun_decl) :
     [progress] to see through the definition. *)
 type prefix_item =
   | PrefixRequire of texpr
-  | PrefixMassert of texpr
   | PrefixLet of bool * tpat * texpr
 
 let extract_precondition (ctx : ctx) (f : fun_decl) : fun_decl * fun_decl option
@@ -279,49 +278,16 @@ let extract_precondition (ctx : ctx) (f : fun_decl) : fun_decl * fun_decl option
         let span = f.item_meta.span in
         let _, fbody = open_all_fun_body ctx span fbody in
         let { inputs; body } = fbody in
-        let get_massert_arg (e : texpr) : texpr option =
-          match e.e with
-          | App
-              ( { e = Qualif { id = FunOrOp (Fun (Pure Assert)); _ }; _ },
-                scrut_arg ) -> Some scrut_arg
-          | _ -> None
-        in
         let rec decompose_lets (e : texpr) : (prefix_item * texpr) list =
           match e.e with
           | Let (monadic, pat, rhs, next_e) ->
               let item =
-                match
-                  (monadic, is_aeneas_require_call ctx rhs, get_massert_arg rhs)
-                with
-                | true, Some cond, _ -> PrefixRequire cond
-                | true, None, Some cond -> PrefixMassert cond
+                match (monadic, is_aeneas_require_call ctx rhs) with
+                | true, Some cond -> PrefixRequire cond
                 | _ -> PrefixLet (monadic, pat, rhs)
               in
               (item, next_e) :: decompose_lets next_e
           | _ -> []
-        in
-        let item_fvars (item : prefix_item) : FVarId.Set.t =
-          match item with
-          | PrefixRequire cond | PrefixMassert cond -> texpr_get_fvars cond
-          | PrefixLet (_, _, rhs) -> texpr_get_fvars rhs
-        in
-        let rec check_prefix_items (cont_fvars : FVarId.Set.t)
-            (items : prefix_item list) : bool =
-          match items with
-          | [] -> true
-          | (PrefixRequire _ | PrefixMassert _) :: rest ->
-              check_prefix_items cont_fvars rest
-          | PrefixLet (_, pat, _) :: rest ->
-              let pat_fvars = tpat_get_fvars pat in
-              let subsequent_fvars =
-                List.fold_left
-                  (fun acc it -> FVarId.Set.union acc (item_fvars it))
-                  FVarId.Set.empty rest
-              in
-              (not (FVarId.Set.is_empty pat_fvars))
-              && FVarId.Set.disjoint pat_fvars cont_fvars
-              && FVarId.Set.subset pat_fvars subsequent_fvars
-              && check_prefix_items cont_fvars rest
         in
         let rec contains_aeneas_require (e : texpr) : bool =
           if Option.is_some (is_aeneas_require_call ctx e) then true
@@ -356,12 +322,6 @@ let extract_precondition (ctx : ctx) (f : fun_decl) : fun_decl * fun_decl option
             | EError _ -> false
         in
         let items_with_conts = decompose_lets body in
-        let has_explicit_require =
-          List.exists
-            (fun (item, _) ->
-              match item with PrefixRequire _ -> true | _ -> false)
-            items_with_conts
-        in
         let best = ref None in
         let _ =
           List.fold_left
@@ -371,10 +331,6 @@ let extract_precondition (ctx : ctx) (f : fun_decl) : fun_decl * fun_decl option
               | PrefixRequire _ ->
                   let candidate = List.rev acc_rev in
                   best := Some (candidate, cont)
-              | PrefixMassert _ when not has_explicit_require ->
-                  let candidate = List.rev acc_rev in
-                  if check_prefix_items (texpr_get_fvars cont) candidate then
-                    best := Some (candidate, cont)
               | _ -> ());
               acc_rev)
             [] items_with_conts
@@ -386,19 +342,6 @@ let extract_precondition (ctx : ctx) (f : fun_decl) : fun_decl * fun_decl option
                 "Precondition 'requires!' / '__aeneas_require' must appear at the beginning of the function body";
             (f, None)
         | Some (items_prefix, cont) ->
-            let _ =
-              List.fold_left
-                (fun seen_massert item ->
-                  match item with
-                  | PrefixMassert _ -> true
-                  | PrefixRequire _ ->
-                      if seen_massert then
-                        [%craise] span
-                          "Precondition 'requires!' / '__aeneas_require' must appear at the beginning of the function body (before any 'assert!' statements)";
-                      seen_massert
-                  | PrefixLet _ -> seen_massert)
-                false items_prefix
-            in
             if contains_aeneas_require cont then
               [%craise] span
                 "Precondition 'requires!' / '__aeneas_require' must appear at the beginning of the function body";
@@ -414,14 +357,14 @@ let extract_precondition (ctx : ctx) (f : fun_decl) : fun_decl * fun_decl option
               | PConstant _ | POpen _ | PBound _ -> pat
             in
             let inputs = List.map ensure_open_pat inputs in
-            (* Filter [items_prefix] for [Φ'f]: keep all [PrefixRequire] and
-               [PrefixMassert] assertions plus only the [PrefixLet] bindings
-               that those assertions transitively depend on. *)
+            (* Filter [items_prefix] for [Φ'f]: keep all [PrefixRequire]
+               assertions plus only the [PrefixLet] bindings that those
+               assertions transitively depend on. *)
             let _, pre_items =
               List.fold_right
                 (fun item (needed_fvars, acc) ->
                   match item with
-                  | PrefixRequire cond | PrefixMassert cond ->
+                  | PrefixRequire cond ->
                       let needed_fvars =
                         FVarId.Set.union needed_fvars (texpr_get_fvars cond)
                       in
@@ -443,7 +386,7 @@ let extract_precondition (ctx : ctx) (f : fun_decl) : fun_decl * fun_decl option
               List.fold_right
                 (fun item acc ->
                   match item with
-                  | PrefixRequire cond | PrefixMassert cond ->
+                  | PrefixRequire cond ->
                       let massert_expr = mk_massert_texpr span cond in
                       let ignored_pat = mk_ignored_pat mk_unit_ty in
                       {
@@ -506,17 +449,20 @@ let extract_precondition (ctx : ctx) (f : fun_decl) : fun_decl * fun_decl option
             let call_expr = [%add_loc] mk_apps span fn_expr args in
             let ignored_pat = mk_ignored_pat mk_unit_ty in
             (* Re-wrap any [PrefixLet] bindings from [items_prefix] whose
-               variables are needed by [cont] (or subsequent kept [PrefixLet]s)
+               variables are needed by [cont] (or subsequent kept [PrefixLet]s),
+               or which have ignored patterns (such as regular [assert!]s),
                inside the main function body after [massert (Φ'f args = ok ())]. *)
             let _, cont_with_needed_lets =
               List.fold_right
                 (fun item (needed_fvars, acc_expr) ->
                   match item with
-                  | PrefixRequire _ | PrefixMassert _ ->
-                      (needed_fvars, acc_expr)
+                  | PrefixRequire _ -> (needed_fvars, acc_expr)
                   | PrefixLet (monadic, pat, rhs) ->
                       let pat_fvars = tpat_get_fvars pat in
-                      if not (FVarId.Set.disjoint pat_fvars needed_fvars) then
+                      if
+                        FVarId.Set.is_empty pat_fvars
+                        || not (FVarId.Set.disjoint pat_fvars needed_fvars)
+                      then
                         let needed_fvars =
                           FVarId.Set.union
                             (FVarId.Set.diff needed_fvars pat_fvars)

@@ -636,24 +636,17 @@ let simplify_duplicate_calls_visitor (ctx : ctx) (def : fun_decl) =
 
     method! visit_Let env monadic pat bound next =
       let bound = self#visit_texpr env bound in
-      (* Do not propagate expression mappings across [massert] or [__aeneas_require]
-         boundaries. Otherwise, temporary bindings introduced to evaluate an
-         assertion or precondition would be reused for expressions in the subsequent
+      (* Do not propagate expression mappings across [__aeneas_require]
+         boundaries. Otherwise, temporary bindings introduced to evaluate a
+         precondition would be reused for expressions in the subsequent
          function body, coupling the precondition's temporaries to the body
          continuation and preventing [extract_precondition] from extracting
          preconditions cleanly. *)
-      let is_massert =
-        match bound.e with
-        | App
-            ( { e = Qualif { id = FunOrOp (Fun (Pure Assert)); _ }; _ },
-              _ ) ->
-            true
-        | _ -> Option.is_some (is_aeneas_require_call ctx bound)
-      in
+      let is_require = Option.is_some (is_aeneas_require_call ctx bound) in
       (* Register the function call if the pattern doesn't contain ignored
          variables *)
       let env =
-        if is_massert then TExprMap.empty
+        if is_require then TExprMap.empty
         else
           let factor =
             monadic

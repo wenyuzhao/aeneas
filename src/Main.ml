@@ -232,8 +232,8 @@ let () =
          the required target features are available." );
       ( "-extract-preconditions",
         Arg.Set extract_preconditions,
-        " Extract leading asserts/debug_asserts into standalone precondition \
-         definitions." );
+        " Extract preconditions (marked with __aeneas_require) into standalone \
+         precondition definitions." );
       ( "-loops-no-rec",
         Arg.Set no_recursive_loops,
         " Never attempt to extract loops to recursive functions." );

@@ -1,5 +1,5 @@
 [[92mInfo[39m ] Imported: tests/llbc/preconditions_misplaced.llbc
-[[91mError[39m] Precondition 'requires!' / '__aeneas_require' must appear at the beginning of the function body (before any 'assert!' statements)
-Source: 'tests/src/preconditions_misplaced.rs', lines 10:0-14:1
-Compiler source: pure/PureMicroPasses.ml, line 396
+[[91mError[39m] Precondition 'requires!' / '__aeneas_require' must appear at the beginning of the function body
+Source: 'tests/src/preconditions_misplaced.rs', lines 10:0-15:1
+Compiler source: pure/PureMicroPasses.ml, line 341
 

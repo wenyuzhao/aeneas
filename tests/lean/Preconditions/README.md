@@ -1,31 +1,39 @@
 # Precondition Extraction (`-extract-preconditions`)
 
-When Aeneas is invoked with the `-extract-preconditions` CLI flag, it automatically extracts leading precondition assertions from Rust functions into standalone Lean definitions returning `Result Unit`.
+When Aeneas is invoked with the `-extract-preconditions` CLI flag, it extracts precondition assertions marked with `#[no_mangle] fn __aeneas_require` from Rust functions into standalone Lean definitions returning `Result Unit`.
 
 ## What Format is Identified as a Precondition
 
-A prefix of statements at the very beginning of a Rust function body is identified as a precondition if it consists of:
-1. **Assertions**: One or more consecutive `assert!(...)`, `debug_assert!(...)`, `assert_eq!(...)`, `assert_ne!(...)`, `debug_assert_eq!(...)`, or `debug_assert_ne!(...)` calls (including compound conditions such as `assert!(a && b)` that lower to multiple assertions).
-2. **Supporting Temporary Bindings**: Any intermediate `let` bindings computed solely to evaluate those assertions (for example, `let b1 ← bar b` inside `assert!(bar(b))`), provided that **none** of those temporary variables are referenced in the remainder of the function body after the assertion prefix.
+A prefix of statements at the very beginning of a Rust function body is identified as a precondition if it contains calls to a marker function:
+```rust
+#[no_mangle]
+pub fn __aeneas_require(cond: bool) {
+    assert!(cond);
+}
+```
+1. **Precondition Markers**: One or more `__aeneas_require(...)` calls appearing in the top-level statement prefix of the function body.
+2. **Supporting Temporary Bindings**: Any intermediate `let` bindings computed between or before `__aeneas_require(...)` calls. Bindings needed by `__aeneas_require(...)` are included in the precondition definition `Φ'<fn_name>`, while regular `assert!` statements and bindings needed by the function body continuation are preserved in `<fn_name>`.
 
 ### Examples of What Is / Is Not Extracted
 
 - **Extracted**:
-  - Single or consecutive leading `assert!` / `debug_assert!` / `assert_eq!` / `assert_ne!` / `debug_assert_eq!` / `debug_assert_ne!` statements on function parameters.
-  - Helper function calls or sub-expressions inside leading assertions (e.g., `assert!(bar(b))`).
+  - Single or consecutive `__aeneas_require(...)` statements on function parameters.
+  - Helper function calls or sub-expressions inside `__aeneas_require(...)` (e.g., `__aeneas_require(bar(b))`).
+  - `__aeneas_require(...)` statements appearing after or interleaved with regular `assert!` statements (only the `__aeneas_require` assertions and their dependencies are extracted into `Φ'<fn_name>`).
 - **Partially Extracted**:
   - In `partial_extraction`:
     ```rust
     pub fn partial_extraction(x: i32) -> i32 {
-        assert!(x > 0);      // Extracted into Φ'partial_extraction
-        let y = x + 1;       // `y` is used in the return value below
-        assert!(y < 100);    // Kept in `partial_extraction` body
+        __aeneas_require(x > 0); // Extracted into Φ'partial_extraction
+        let y = x + 1;           // Kept in `partial_extraction` body
+        assert!(y < 100);        // Kept in `partial_extraction` body
         y
     }
     ```
-    Only `assert!(x > 0)` is extracted into `Φ'partial_extraction`, because `let y = x + 1` produces a variable `y` used in the function's return value.
+    Only `__aeneas_require(x > 0)` is extracted into `Φ'partial_extraction`, while regular `assert!` statements remain in the function body.
 - **Not Extracted**:
-  - Assertions that appear after a computation whose result is used later in the function body (e.g., `no_precondition`).
+  - Functions without `__aeneas_require` calls (e.g., `no_precondition`). Regular `assert!` statements are never treated as preconditions.
+  - `__aeneas_require` calls placed inside branches or loops are rejected with an error.
 
 ## Naming Convention and Generated Definition
 
@@ -45,7 +53,7 @@ For a Rust function named `<fn_name>`, Aeneas generates:
 From `tests/src/preconditions.rs`:
 ```rust
 pub fn left_shift_one(v: i32) -> i32 {
-    assert!(v >= 0 && v < 1024);
+    __aeneas_require(v >= 0 && v < 1024);
     let r = v << 1;
     assert!(r == v * 2);
     r
