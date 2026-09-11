@@ -2464,8 +2464,10 @@ let extract_fun_decl_hol4_opaque (ctx : extraction_ctx) (fmt : F.formatter)
 let extract_fun_decl (ctx : extraction_ctx) (fmt : F.formatter)
     (kind : decl_kind) (has_decreases_clause : bool) (def : fun_decl) : unit =
   [%sanity_check] def.item_meta.span (not def.is_global_decl_body);
+  (* Do not emit the [#[no_mangle] fn __aeneas_require] precondition marker function *)
+  if PureMicroPassesBase.is_aeneas_require_fun_decl def then ()
   (* We treat HOL4 opaque functions in a specific manner *)
-  if backend () = HOL4 && Option.is_none def.body then
+  else if backend () = HOL4 && Option.is_none def.body then
     extract_fun_decl_hol4_opaque ctx fmt def
   else extract_fun_decl_gen ctx fmt kind has_decreases_clause def
 

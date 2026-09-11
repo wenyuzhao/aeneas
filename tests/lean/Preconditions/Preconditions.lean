@@ -162,4 +162,23 @@ def duplicate_call_after_assert : Result Unit := do
   let val ← make_val
   massert (val = 0#i32)
 
+/-- [preconditions::with_aeneas_require]:
+    Source: 'tests/src/preconditions.rs', lines 81:0-88:1
+    Visibility: public -/
+def Φ'with_aeneas_require (x : Std.I32) (y : Std.I32) : Result Unit := do
+  massert (x > 0#i32)
+  massert (y > 0#i32)
+  let sum ← x + y
+  massert (sum > 10#i32)
+  ok ()
+
+/-- [preconditions::with_aeneas_require]:
+    Source: 'tests/src/preconditions.rs', lines 81:0-88:1
+    Visibility: public -/
+def with_aeneas_require (x : Std.I32) (y : Std.I32) : Result Std.I32 := do
+  Φ'with_aeneas_require x y
+  let sum ← x + y
+  massert (y > 0#i32)
+  ok sum
+
 end preconditions

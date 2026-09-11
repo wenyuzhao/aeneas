@@ -140,3 +140,40 @@ let open_all_texpr ctx = open_all_texpr ctx.fresh_fvar_id
 
 let opt_destruct_loop_result_decompose_outputs ctx =
   opt_destruct_loop_result_decompose_outputs ctx.fresh_fvar_id
+
+
+(** Return [true] if [fdecl] is the special [#[no_mangle] fn __aeneas_require]
+    precondition marker function. *)
+let is_aeneas_require_fun_decl (fdecl : fun_decl) : bool =
+  let has_name =
+    match List.rev fdecl.item_meta.name with
+    | T.PeIdent ("__aeneas_require", _) :: _ -> true
+    | _ -> false
+  in
+  let has_no_mangle =
+    List.exists
+      (function
+        | Meta.AttrBuiltin (Meta.RustcAttributeKindNoMangle _) -> true
+        | _ -> false)
+      fdecl.item_meta.attr_info.attributes
+  in
+  has_name && has_no_mangle
+
+(** If [e] is a call to [#[no_mangle] fn __aeneas_require(cond)], return [Some cond]. *)
+let is_aeneas_require_call (ctx : ctx) (e : texpr) : texpr option =
+  match e.e with
+  | App
+      ( {
+          e =
+            Qualif
+              {
+                id = FunOrOp (Fun (FromLlbc (FunId (FRegular fid), _)));
+                _;
+              };
+          _;
+        },
+        scrut_arg ) -> (
+      match FunDeclId.Map.find_opt fid ctx.fun_decls with
+      | Some fdecl when is_aeneas_require_fun_decl fdecl -> Some scrut_arg
+      | _ -> None)
+  | _ -> None

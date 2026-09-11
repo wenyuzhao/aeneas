@@ -68,3 +68,21 @@ pub fn duplicate_call_after_assert() {
     let val = make_val();
     assert!(val == 0);
 }
+
+/// 8. Explicit `#[no_mangle] fn __aeneas_require` precondition markers:
+/// multiple `__aeneas_require` calls (even interleaved with `let` bindings used in the body)
+/// are extracted into `Φ'with_aeneas_require`, while regular `assert!` statements in the body
+/// remain in the function body.
+#[no_mangle]
+pub fn __aeneas_require(cond: bool) {
+    assert!(cond);
+}
+
+pub fn with_aeneas_require(x: i32, y: i32) -> i32 {
+    __aeneas_require(x > 0);
+    __aeneas_require(y > 0);
+    let sum = x + y;
+    __aeneas_require(sum > 10);
+    assert!(y > 0);
+    sum
+}

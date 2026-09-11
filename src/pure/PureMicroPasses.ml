@@ -264,155 +264,231 @@ let apply_passes_to_def (ctx : ctx) (def : fun_decl) :
     and the translation of the function itself simply calls the loop body. By
     marking the function as reducible, we allow tactics like [simp] or
     [progress] to see through the definition. *)
-type prefix_item = PrefixMassert of texpr | PrefixLet of bool * tpat * texpr
+type prefix_item =
+  | PrefixRequire of texpr
+  | PrefixMassert of texpr
+  | PrefixLet of bool * tpat * texpr
 
 let extract_precondition (ctx : ctx) (f : fun_decl) : fun_decl * fun_decl option
     =
-  match (f.body, f.loop_id) with
-  | None, _ | _, Some _ -> (f, None)
-  | Some fbody, None -> (
-      let span = f.item_meta.span in
-      let _, fbody = open_all_fun_body ctx span fbody in
-      let { inputs; body } = fbody in
-      let get_massert_arg (e : texpr) : texpr option =
-        match e.e with
-        | App
-            ( { e = Qualif { id = FunOrOp (Fun (Pure Assert)); _ }; _ },
-              scrut_arg ) -> Some scrut_arg
-        | _ -> None
-      in
-      let rec decompose_lets (e : texpr) : (prefix_item * texpr) list =
-        match e.e with
-        | Let (monadic, pat, rhs, next_e) ->
-            let item =
-              match (monadic, get_massert_arg rhs) with
-              | true, Some cond -> PrefixMassert cond
-              | _ -> PrefixLet (monadic, pat, rhs)
-            in
-            (item, next_e) :: decompose_lets next_e
-        | _ -> []
-      in
-      let item_fvars (item : prefix_item) : FVarId.Set.t =
-        match item with
-        | PrefixMassert cond -> texpr_get_fvars cond
-        | PrefixLet (_, _, rhs) -> texpr_get_fvars rhs
-      in
-      let rec check_prefix_items (cont_fvars : FVarId.Set.t)
-          (items : prefix_item list) : bool =
-        match items with
-        | [] -> true
-        | PrefixMassert _ :: rest -> check_prefix_items cont_fvars rest
-        | PrefixLet (_, pat, _) :: rest ->
-            let pat_fvars = tpat_get_fvars pat in
-            let subsequent_fvars =
-              List.fold_left
-                (fun acc it -> FVarId.Set.union acc (item_fvars it))
-                FVarId.Set.empty rest
-            in
-            (not (FVarId.Set.is_empty pat_fvars))
-            && FVarId.Set.disjoint pat_fvars cont_fvars
-            && FVarId.Set.subset pat_fvars subsequent_fvars
-            && check_prefix_items cont_fvars rest
-      in
-      let items_with_conts = decompose_lets body in
-      let best = ref None in
-      let _ =
-        List.fold_left
-          (fun acc_rev (item, cont) ->
-            let acc_rev = item :: acc_rev in
-            (match item with
-            | PrefixMassert _ ->
-                let candidate = List.rev acc_rev in
-                if check_prefix_items (texpr_get_fvars cont) candidate then
+  if is_aeneas_require_fun_decl f then (f, None)
+  else
+    match (f.body, f.loop_id) with
+    | None, _ | _, Some _ -> (f, None)
+    | Some fbody, None -> (
+        let span = f.item_meta.span in
+        let _, fbody = open_all_fun_body ctx span fbody in
+        let { inputs; body } = fbody in
+        let get_massert_arg (e : texpr) : texpr option =
+          match e.e with
+          | App
+              ( { e = Qualif { id = FunOrOp (Fun (Pure Assert)); _ }; _ },
+                scrut_arg ) -> Some scrut_arg
+          | _ -> None
+        in
+        let rec decompose_lets (e : texpr) : (prefix_item * texpr) list =
+          match e.e with
+          | Let (monadic, pat, rhs, next_e) ->
+              let item =
+                match
+                  (monadic, is_aeneas_require_call ctx rhs, get_massert_arg rhs)
+                with
+                | true, Some cond, _ -> PrefixRequire cond
+                | true, None, Some cond -> PrefixMassert cond
+                | _ -> PrefixLet (monadic, pat, rhs)
+              in
+              (item, next_e) :: decompose_lets next_e
+          | _ -> []
+        in
+        let item_fvars (item : prefix_item) : FVarId.Set.t =
+          match item with
+          | PrefixRequire cond | PrefixMassert cond -> texpr_get_fvars cond
+          | PrefixLet (_, _, rhs) -> texpr_get_fvars rhs
+        in
+        let rec check_prefix_items (cont_fvars : FVarId.Set.t)
+            (items : prefix_item list) : bool =
+          match items with
+          | [] -> true
+          | (PrefixRequire _ | PrefixMassert _) :: rest ->
+              check_prefix_items cont_fvars rest
+          | PrefixLet (_, pat, _) :: rest ->
+              let pat_fvars = tpat_get_fvars pat in
+              let subsequent_fvars =
+                List.fold_left
+                  (fun acc it -> FVarId.Set.union acc (item_fvars it))
+                  FVarId.Set.empty rest
+              in
+              (not (FVarId.Set.is_empty pat_fvars))
+              && FVarId.Set.disjoint pat_fvars cont_fvars
+              && FVarId.Set.subset pat_fvars subsequent_fvars
+              && check_prefix_items cont_fvars rest
+        in
+        let items_with_conts = decompose_lets body in
+        let has_explicit_require =
+          List.exists
+            (fun (item, _) ->
+              match item with PrefixRequire _ -> true | _ -> false)
+            items_with_conts
+        in
+        let best = ref None in
+        let _ =
+          List.fold_left
+            (fun acc_rev (item, cont) ->
+              let acc_rev = item :: acc_rev in
+              (match item with
+              | PrefixRequire _ ->
+                  let candidate = List.rev acc_rev in
                   best := Some (candidate, cont)
-            | PrefixLet _ -> ());
-            acc_rev)
-          [] items_with_conts
-      in
-      match !best with
-      | None -> (f, None)
-      | Some (items_prefix, cont) ->
-          let rec ensure_open_pat (pat : tpat) : tpat =
-            match pat.pat with
-            | PIgnored ->
-                let id = ctx.fresh_fvar_id () in
-                let fv : fvar = { id; basename = None; ty = pat.ty } in
-                { pat with pat = POpen (fv, None) }
-            | PAdt av ->
-                let fields = List.map ensure_open_pat av.fields in
-                { pat with pat = PAdt { av with fields } }
-            | PConstant _ | POpen _ | PBound _ -> pat
-          in
-          let inputs = List.map ensure_open_pat inputs in
-          let pre_body_expr =
-            List.fold_right
-              (fun item acc ->
-                match item with
-                | PrefixMassert cond ->
-                    let massert_expr = mk_massert_texpr span cond in
-                    let ignored_pat = mk_ignored_pat mk_unit_ty in
-                    {
-                      e = Let (true, ignored_pat, massert_expr, acc);
-                      ty = mk_result_ty mk_unit_ty;
-                    }
-                | PrefixLet (monadic, pat, rhs) ->
-                    {
-                      e = Let (monadic, pat, rhs, acc);
-                      ty = mk_result_ty mk_unit_ty;
-                    })
-              items_prefix
-              (mk_result_ok_texpr span mk_unit_texpr)
-          in
-          let pre_body =
-            close_all_fun_body span { inputs; body = pre_body_expr }
-          in
-          let pre_sig : fun_sig =
-            {
-              f.signature with
-              output = mk_result_ty mk_unit_ty;
-              fwd_info =
-                {
-                  effect_info =
-                    { can_fail = true; can_diverge = false; is_rec = false };
-                  ignore_output = false;
-                };
-              back_effect_info = RegionGroupId.Map.empty;
-            }
-          in
-          let pre_decl : fun_decl =
-            {
-              f with
-              is_precondition = true;
-              name = "Φ'" ^ f.name;
-              signature = pre_sig;
-              body = Some pre_body;
-            }
-          in
-          let args =
-            List.map
-              (fun pat -> [%silent_unwrap] span (tpat_to_texpr span pat))
-              inputs
-          in
-          let generic_args = generic_args_of_params f.signature.generics in
-          let fn_ty = mk_arrows f.signature.inputs (mk_result_ty mk_unit_ty) in
-          let fn_expr =
-            {
-              e =
-                Qualif
+              | PrefixMassert _ when not has_explicit_require ->
+                  let candidate = List.rev acc_rev in
+                  if check_prefix_items (texpr_get_fvars cont) candidate then
+                    best := Some (candidate, cont)
+              | _ -> ());
+              acc_rev)
+            [] items_with_conts
+        in
+        match !best with
+        | None -> (f, None)
+        | Some (items_prefix, cont) ->
+            let rec ensure_open_pat (pat : tpat) : tpat =
+              match pat.pat with
+              | PIgnored ->
+                  let id = ctx.fresh_fvar_id () in
+                  let fv : fvar = { id; basename = None; ty = pat.ty } in
+                  { pat with pat = POpen (fv, None) }
+              | PAdt av ->
+                  let fields = List.map ensure_open_pat av.fields in
+                  { pat with pat = PAdt { av with fields } }
+              | PConstant _ | POpen _ | PBound _ -> pat
+            in
+            let inputs = List.map ensure_open_pat inputs in
+            (* Filter [items_prefix] for [Φ'f]: keep all [PrefixRequire] and
+               [PrefixMassert] assertions plus only the [PrefixLet] bindings
+               that those assertions transitively depend on. *)
+            let _, pre_items =
+              List.fold_right
+                (fun item (needed_fvars, acc) ->
+                  match item with
+                  | PrefixRequire cond | PrefixMassert cond ->
+                      let needed_fvars =
+                        FVarId.Set.union needed_fvars (texpr_get_fvars cond)
+                      in
+                      (needed_fvars, item :: acc)
+                  | PrefixLet (_, pat, rhs) ->
+                      let pat_fvars = tpat_get_fvars pat in
+                      if not (FVarId.Set.disjoint pat_fvars needed_fvars) then
+                        let needed_fvars =
+                          FVarId.Set.union
+                            (FVarId.Set.diff needed_fvars pat_fvars)
+                            (texpr_get_fvars rhs)
+                        in
+                        (needed_fvars, item :: acc)
+                      else (needed_fvars, acc))
+                items_prefix
+                (FVarId.Set.empty, [])
+            in
+            let pre_body_expr =
+              List.fold_right
+                (fun item acc ->
+                  match item with
+                  | PrefixRequire cond | PrefixMassert cond ->
+                      let massert_expr = mk_massert_texpr span cond in
+                      let ignored_pat = mk_ignored_pat mk_unit_ty in
+                      {
+                        e = Let (true, ignored_pat, massert_expr, acc);
+                        ty = mk_result_ty mk_unit_ty;
+                      }
+                  | PrefixLet (monadic, pat, rhs) ->
+                      {
+                        e = Let (monadic, pat, rhs, acc);
+                        ty = mk_result_ty mk_unit_ty;
+                      })
+                pre_items
+                (mk_result_ok_texpr span mk_unit_texpr)
+            in
+            let pre_body =
+              close_all_fun_body span { inputs; body = pre_body_expr }
+            in
+            let pre_sig : fun_sig =
+              {
+                f.signature with
+                output = mk_result_ty mk_unit_ty;
+                fwd_info =
                   {
-                    id = FunOrOp (Fun (Precondition f.def_id));
-                    generics = generic_args;
+                    effect_info =
+                      { can_fail = true; can_diverge = false; is_rec = false };
+                    ignore_output = false;
                   };
-              ty = fn_ty;
-            }
-          in
-          let call_expr = [%add_loc] mk_apps span fn_expr args in
-          let ignored_pat = mk_ignored_pat mk_unit_ty in
-          let new_main_body_expr =
-            { e = Let (true, ignored_pat, call_expr, cont); ty = cont.ty }
-          in
-          let new_main_body =
-            close_all_fun_body span { inputs; body = new_main_body_expr }
+                back_effect_info = RegionGroupId.Map.empty;
+              }
+            in
+            let pre_decl : fun_decl =
+              {
+                f with
+                is_precondition = true;
+                name = "Φ'" ^ f.name;
+                signature = pre_sig;
+                body = Some pre_body;
+              }
+            in
+            let args =
+              List.map
+                (fun pat -> [%silent_unwrap] span (tpat_to_texpr span pat))
+                inputs
+            in
+            let generic_args = generic_args_of_params f.signature.generics in
+            let fn_ty =
+              mk_arrows f.signature.inputs (mk_result_ty mk_unit_ty)
+            in
+            let fn_expr =
+              {
+                e =
+                  Qualif
+                    {
+                      id = FunOrOp (Fun (Precondition f.def_id));
+                      generics = generic_args;
+                    };
+                ty = fn_ty;
+              }
+            in
+            let call_expr = [%add_loc] mk_apps span fn_expr args in
+            let ignored_pat = mk_ignored_pat mk_unit_ty in
+            (* Re-wrap any [PrefixLet] bindings from [items_prefix] whose
+               variables are needed by [cont] (or subsequent kept [PrefixLet]s)
+               inside the main function body after [massert (Φ'f args = ok ())]. *)
+            let _, cont_with_needed_lets =
+              List.fold_right
+                (fun item (needed_fvars, acc_expr) ->
+                  match item with
+                  | PrefixRequire _ | PrefixMassert _ ->
+                      (needed_fvars, acc_expr)
+                  | PrefixLet (monadic, pat, rhs) ->
+                      let pat_fvars = tpat_get_fvars pat in
+                      if not (FVarId.Set.disjoint pat_fvars needed_fvars) then
+                        let needed_fvars =
+                          FVarId.Set.union
+                            (FVarId.Set.diff needed_fvars pat_fvars)
+                            (texpr_get_fvars rhs)
+                        in
+                        let wrapped =
+                          {
+                            e = Let (monadic, pat, rhs, acc_expr);
+                            ty = acc_expr.ty;
+                          }
+                        in
+                        (needed_fvars, wrapped)
+                      else (needed_fvars, acc_expr))
+                items_prefix
+                (texpr_get_fvars cont, cont)
+            in
+            let new_main_body_expr =
+              {
+                e = Let (true, ignored_pat, call_expr, cont_with_needed_lets);
+                ty = cont_with_needed_lets.ty;
+              }
+            in
+            let new_main_body =
+              close_all_fun_body span { inputs; body = new_main_body_expr }
           in
           let new_f = { f with body = Some new_main_body } in
           (new_f, Some pre_decl))

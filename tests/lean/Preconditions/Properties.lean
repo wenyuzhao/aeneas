@@ -28,4 +28,15 @@ theorem duplicate_call_after_assert_verify (h : Φ'duplicate_call_after_assert =
   rw [h]
   step*
 
+
+theorem with_aeneas_require_verify (x y : Std.I32) (h : Φ'with_aeneas_require x y = ok ()) :
+    with_aeneas_require x y ⦃ _ => True ⦄ := by
+  unfold with_aeneas_require
+  rw [h]
+  unfold Φ'with_aeneas_require massert at h
+  simp only [bind_tc_ok] at h ⊢
+  split at h <;> try contradiction
+  split at h <;> try contradiction
+  rcases h_sum : (x + y) with ⟨sum⟩ | _ | _ <;> simp_all
+
 end preconditions

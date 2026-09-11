@@ -630,25 +630,25 @@ let simplify_let_bindings =
 
     TODO: this micro-pass will not be sound anymore once we allow stateful
     (backward) functions. *)
-let simplify_duplicate_calls_visitor (_ctx : ctx) (def : fun_decl) =
+let simplify_duplicate_calls_visitor (ctx : ctx) (def : fun_decl) =
   object (self)
     inherit [_] map_expr as super
 
     method! visit_Let env monadic pat bound next =
       let bound = self#visit_texpr env bound in
-      (* Do not propagate expression mappings across [massert] boundaries.
-         Otherwise, temporary bindings introduced to evaluate an assertion
-         (e.g., inside [assert_eq!(...)]) would be reused for expressions in
-         the subsequent function body, coupling the assertion's temporaries
-         to the body continuation and preventing [extract_precondition] from
-         extracting leading assertions as preconditions. *)
+      (* Do not propagate expression mappings across [massert] or [__aeneas_require]
+         boundaries. Otherwise, temporary bindings introduced to evaluate an
+         assertion or precondition would be reused for expressions in the subsequent
+         function body, coupling the precondition's temporaries to the body
+         continuation and preventing [extract_precondition] from extracting
+         preconditions cleanly. *)
       let is_massert =
         match bound.e with
         | App
             ( { e = Qualif { id = FunOrOp (Fun (Pure Assert)); _ }; _ },
               _ ) ->
             true
-        | _ -> false
+        | _ -> Option.is_some (is_aeneas_require_call ctx bound)
       in
       (* Register the function call if the pattern doesn't contain ignored
          variables *)
